@@ -1,0 +1,14 @@
+# Copy to .dev.vars for `wrangler dev`. NEVER commit the real .dev.vars.
+# In production these are set with `wrangler secret put <NAME>`.
+
+# GitHub OAuth app (gates WHO may call the MCP). Client id is also in wrangler vars.
+GITHUB_CLIENT_ID=Iv1_xxxxxxxxxxxx
+GITHUB_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Random 32+ char string used to encrypt the OAuth approval cookie / state.
+# Generate: openssl rand -hex 32
+COOKIE_ENCRYPTION_KEY=replace-with-openssl-rand-hex-32
+
+# GitHub App private key (PKCS#8 / PEM) — the credential that WRITES commits.
+# Paste the full key including BEGIN/END lines; \n-escaped on one line is also accepted.
+GITHUB_APP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"

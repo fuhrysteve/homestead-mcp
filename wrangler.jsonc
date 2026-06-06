@@ -1,0 +1,51 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "homestead-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-05-10",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MCP_OBJECT",
+        "class_name": "HomesteadMCP"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["HomesteadMCP"]
+    }
+  ],
+  // KV namespace backing the OAuth provider's token/grant store.
+  // Create with: wrangler kv namespace create OAUTH_KV   then paste the id here.
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+    }
+  ],
+  // Non-secret config. Secrets (GITHUB_CLIENT_SECRET, GITHUB_APP_PRIVATE_KEY,
+  // COOKIE_ENCRYPTION_KEY) are set via `wrangler secret put`, never committed.
+  "vars": {
+    // GitHub login(s) allowed to authorize this connector, comma-separated.
+    "ALLOWED_GITHUB_LOGINS": "fuhrysteve",
+    // Target repo the bot writes to.
+    "GITHUB_OWNER": "fuhrysteve",
+    "GITHUB_REPO": "homestead",
+    "GITHUB_BRANCH": "master",
+    // Allowed homestead domains (docs/<domain>/...), comma-separated.
+    "ALLOWED_DOMAINS": "gardening,chickens,beekeeping",
+    // Bot commit identity.
+    "COMMIT_AUTHOR_NAME": "homestead-bot",
+    "COMMIT_AUTHOR_EMAIL": "homestead-bot@fuhry.app",
+    // GitHub App identifiers (non-secret). Private key + OAuth secret are secrets.
+    "GITHUB_APP_ID": "REPLACE_WITH_APP_ID",
+    "GITHUB_APP_INSTALLATION_ID": "REPLACE_WITH_INSTALLATION_ID",
+    "GITHUB_CLIENT_ID": "REPLACE_WITH_OAUTH_CLIENT_ID"
+  }
+}

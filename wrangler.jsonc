@@ -43,9 +43,10 @@
     // Bot commit identity.
     "COMMIT_AUTHOR_NAME": "homestead-bot",
     "COMMIT_AUTHOR_EMAIL": "homestead-bot@fuhry.app",
-    // GitHub App identifiers (non-secret). Private key + OAuth secret are secrets.
-    "GITHUB_APP_ID": "REPLACE_WITH_APP_ID",
-    "GITHUB_APP_INSTALLATION_ID": "REPLACE_WITH_INSTALLATION_ID",
-    "GITHUB_CLIENT_ID": "REPLACE_WITH_OAUTH_CLIENT_ID"
+    // GitHub App identifiers (non-secret). Private key + client secret are secrets.
+    // Installation id is auto-resolved from the repo, so it's not configured here.
+    // GITHUB_CLIENT_ID is the App's own client id (App does the user-auth/OAuth gate too).
+    "GITHUB_APP_ID": "3983107",
+    "GITHUB_CLIENT_ID": "Iv23lior6I6XM4C9DL9I"
   }
 }

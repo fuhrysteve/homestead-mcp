@@ -22,7 +22,7 @@ export interface Env {
 
   // GitHub App (what writes the commits).
   GITHUB_APP_ID: string;
-  GITHUB_APP_INSTALLATION_ID: string;
+  GITHUB_APP_INSTALLATION_ID?: string; // optional; auto-resolved from the repo if unset
   GITHUB_APP_PRIVATE_KEY: string; // secret, PKCS#8 PEM
 }
 

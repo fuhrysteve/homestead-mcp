@@ -82,22 +82,53 @@ async function createAppJwt(appId: string, privateKeyPem: string): Promise<strin
   return `${data}.${b64urlFromBytes(new Uint8Array(sig))}`;
 }
 
-// Installation token cache (per isolate). Tokens last ~1h; refresh early.
+function appJwtHeaders(jwt: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${jwt}`,
+    Accept: "application/vnd.github+json",
+    "User-Agent": UA,
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+}
+
+// Caches (per isolate). Installation tokens last ~1h; refresh early.
 let cachedToken: { token: string; exp: number } | null = null;
+let cachedInstallationId: string | null = null;
+
+/**
+ * Resolve the App's installation id. Prefer the configured value; otherwise look
+ * it up from the target repo (authoritative, survives reinstalls) so it never has
+ * to be hand-copied into config.
+ */
+async function resolveInstallationId(env: Env, jwt: string): Promise<string> {
+  const configured = (env.GITHUB_APP_INSTALLATION_ID ?? "").trim();
+  if (configured && !configured.startsWith("REPLACE")) return configured;
+  if (cachedInstallationId) return cachedInstallationId;
+
+  const res = await fetch(`${API}/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/installation`, {
+    headers: appJwtHeaders(jwt),
+  });
+  if (!res.ok) {
+    throw new GitHubError(
+      `Could not resolve installation for ${env.GITHUB_OWNER}/${env.GITHUB_REPO} (${res.status}). ` +
+        `Is the GitHub App installed on that repo with Contents: read/write?`,
+      res.status,
+    );
+  }
+  const json = (await res.json()) as { id: number };
+  cachedInstallationId = String(json.id);
+  return cachedInstallationId;
+}
 
 async function getInstallationToken(env: Env): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   if (cachedToken && cachedToken.exp - 120 > now) return cachedToken.token;
 
   const jwt = await createAppJwt(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY);
-  const res = await fetch(`${API}/app/installations/${env.GITHUB_APP_INSTALLATION_ID}/access_tokens`, {
+  const installationId = await resolveInstallationId(env, jwt);
+  const res = await fetch(`${API}/app/installations/${installationId}/access_tokens`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${jwt}`,
-      Accept: "application/vnd.github+json",
-      "User-Agent": UA,
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
+    headers: appJwtHeaders(jwt),
   });
   if (!res.ok) {
     throw new GitHubError(`Installation token exchange failed: ${res.status} ${await res.text()}`, res.status);

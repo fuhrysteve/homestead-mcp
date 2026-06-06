@@ -63,50 +63,51 @@ npm run dev       # wrangler dev (needs .dev.vars — copy .dev.vars.example)
 
 ## Deploy (one-time setup)
 
-### 1. GitHub App (the commit credential)
+**One GitHub App does both jobs** — it mints installation tokens (writes) *and*
+provides the user-authorization (OAuth) flow that gates who may call the connector.
+No separate OAuth App is needed.
 
-1. Create a GitHub App (your account → Settings → Developer settings → GitHub Apps → New).
+### 1. Create the GitHub App
+
+1. Your account → Settings → Developer settings → GitHub Apps → New.
    - **Permissions → Repository → Contents: Read and write.** Nothing else.
-   - No webhook needed.
+   - **Webhook → uncheck Active** (none needed).
+   - Under **Identifying and authorizing users → Callback URL:**
+     `https://homestead-mcp.fuhry.app/callback`
 2. Generate a **private key** — GitHub gives you a PKCS#1 PEM (`BEGIN RSA PRIVATE KEY`).
    WebCrypto needs **PKCS#8**, so convert:
    ```bash
    openssl pkcs8 -topk8 -nocrypt -in downloaded.pem -out homestead-app.pkcs8.pem
    ```
-3. **Install** the App on *only* the `fuhrysteve/homestead` repo.
-4. Note the **App ID** and the **Installation ID** (the latter is in the URL of the
-   installation settings page, or `GET /app/installations`). Put both in `wrangler.jsonc`
-   `vars` (`GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`).
+3. Generate a **client secret** (same page, "Client secrets" → Generate).
+4. **Install** the App on *only* the `fuhrysteve/homestead` repo (Install App → Only
+   select repositories → homestead).
+5. Put the **App ID** and **Client ID** in `wrangler.jsonc` `vars` (`GITHUB_APP_ID`,
+   `GITHUB_CLIENT_ID`). The **Installation ID is auto-resolved** from the repo at
+   runtime — no need to configure it. Set `ALLOWED_GITHUB_LOGINS` to the login(s)
+   permitted to authorize.
 
-### 2. GitHub OAuth app (the access gate)
-
-1. Create an **OAuth App** (Settings → Developer settings → OAuth Apps → New).
-   - **Authorization callback URL:** `https://homestead-mcp.fuhry.app/callback`
-2. Put the **Client ID** in `wrangler.jsonc` `vars.GITHUB_CLIENT_ID`; the secret is a
-   Worker secret (below).
-3. Set `ALLOWED_GITHUB_LOGINS` in `vars` to the GitHub login(s) permitted to authorize.
-
-### 3. KV + secrets + deploy
+### 2. KV + secrets + deploy
 
 ```bash
 # KV namespace backing the OAuth provider; paste the id into wrangler.jsonc
 npx wrangler kv namespace create OAUTH_KV
 
 # Secrets (never committed)
-npx wrangler secret put GITHUB_CLIENT_SECRET
+npx wrangler secret put GITHUB_CLIENT_SECRET       # the GitHub App's client secret
 npx wrangler secret put COOKIE_ENCRYPTION_KEY      # openssl rand -hex 32
 npx wrangler secret put GITHUB_APP_PRIVATE_KEY     # paste the PKCS#8 PEM
 
 npx wrangler deploy
 ```
 
-### 4. Route + WAF
+### 3. Route + WAF
 
 - Bind the Worker to **`homestead-mcp.fuhry.app`** (its own public DNS record — the
   `*.fuhry.app` wildcard otherwise resolves to a private IP).
 - Add a Cloudflare **WAF rate-limit rule** on the route.
 
-### 5. The connector (in MB's claude.ai account)
+### 4. The connector (in MB's claude.ai account)
 
 1. Settings → Connectors → add custom connector, URL `https://homestead-mcp.fuhry.app/mcp`.
 2. Authorize once (Steve does this — GitHub login, allowlisted).

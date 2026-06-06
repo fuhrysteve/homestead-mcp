@@ -7,6 +7,15 @@
   "observability": {
     "enabled": true
   },
+  // Public endpoint. custom_domain auto-creates the DNS record + cert for this
+  // hostname (overriding the private *.fuhry.app wildcard). Requires the fuhry.app
+  // zone to be on the same Cloudflare account.
+  "routes": [
+    {
+      "pattern": "homestead-mcp.fuhry.app",
+      "custom_domain": true
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {

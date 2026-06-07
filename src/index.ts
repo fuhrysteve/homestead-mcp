@@ -15,7 +15,7 @@ export class HomesteadMCP extends McpAgent<Env, unknown, UserProps> {
   server = new McpServer({ name: "homestead-notes", version: "0.1.0" });
 
   async init(): Promise<void> {
-    registerTools(this.server, this.env, this.props!);
+    registerTools(this.server, this.env, this.props);
   }
 }
 

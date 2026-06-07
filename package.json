@@ -13,9 +13,9 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
-    "@cloudflare/workers-oauth-provider": "^0.0.5",
+    "@cloudflare/workers-oauth-provider": "^0.7.2",
     "@modelcontextprotocol/sdk": "^1.12.0",
-    "agents": "^0.0.95",
+    "agents": "^0.14.4",
     "hono": "^4.7.0",
     "zod": "^3.24.0"
   },

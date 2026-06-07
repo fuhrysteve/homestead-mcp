@@ -1,9 +1,9 @@
 /**
- * Pure markdown transforms that encode the homestead repo's conventions:
- *   - log.md: `### YYYY-MM-DD — Title` sections, newest at the TOP of the
- *     current `## <year> season` block.
- *   - notes:  append to / replace a named `##`/`###` section, or whole file.
- * No I/O here — callers fetch/commit the result. Easy to unit test.
+ * Pure markdown transforms (no I/O — easy to unit test):
+ *   - insertLogEntry: prepend a dated `### YYYY-MM-DD — Title` section at the top
+ *     of the current `## <year> season` block in a log.md.
+ *   - applyEdit: Claude-Code-style find/replace within a file, with unique-match
+ *     enforcement so an ambiguous edit fails loudly instead of clobbering.
  */
 
 export class NoteError extends Error {}
@@ -16,6 +16,8 @@ function lf(s: string): string {
 function normalize(s: string): string {
   return s.replace(/\n{3,}/g, "\n\n").replace(/\s+$/, "") + "\n";
 }
+
+// ---- log entries --------------------------------------------------------
 
 function entryBlock(date: string, title: string, body?: string): string {
   const head = `### ${date} — ${title}`;
@@ -65,14 +67,11 @@ export function insertLogEntry(existing: string | null | undefined, opts: LogEnt
 
   const yearIdx = lines.findIndex((l) => yearHeadingRe.test(l));
   if (yearIdx >= 0) {
-    // Newest at top: drop the entry directly under the season heading.
     const out = [...lines];
     out.splice(yearIdx + 1, 0, "", entry);
     return normalize(out.join("\n"));
   }
 
-  // No block for this year yet — create one above the newest existing season,
-  // or after the intro `---` separator if there are no season blocks.
   const firstSeasonIdx = lines.findIndex((l) => anySeasonRe.test(l));
   let insertIdx: number;
   if (firstSeasonIdx >= 0) {
@@ -86,77 +85,55 @@ export function insertLogEntry(existing: string | null | undefined, opts: LogEnt
   return normalize(out.join("\n"));
 }
 
-// ---- note editing -------------------------------------------------------
+// ---- find/replace edit --------------------------------------------------
 
-export type NoteMode = "append" | "replace_section" | "replace_file";
-
-function findHeading(lines: string[], section: string): { index: number; level: number } | null {
-  const want = section.trim().toLowerCase();
-  for (let i = 0; i < lines.length; i++) {
-    const m = /^(#{1,6})\s+(.*?)\s*$/.exec(lines[i]);
-    if (m && m[2].trim().toLowerCase() === want) {
-      return { index: i, level: m[1].length };
-    }
+function countOccurrences(haystack: string, needle: string): number {
+  let count = 0;
+  let i = haystack.indexOf(needle);
+  while (i !== -1) {
+    count++;
+    i = haystack.indexOf(needle, i + needle.length);
   }
-  return null;
+  return count;
 }
 
-/** Index of the next heading at level <= `level`, else end of file. */
-function sectionEnd(lines: string[], startIdx: number, level: number): number {
-  for (let i = startIdx + 1; i < lines.length; i++) {
-    const m = /^(#{1,6})\s+/.exec(lines[i]);
-    if (m && m[1].length <= level) return i;
+/**
+ * Replace `oldText` with `newText` in `content`. Like Claude Code's Edit:
+ * `oldText` must appear exactly once unless `replaceAll` is set, otherwise it
+ * throws so an ambiguous edit can't silently clobber the wrong place.
+ */
+export function applyEdit(
+  content: string,
+  oldText: string,
+  newText: string,
+  replaceAll = false,
+): string {
+  const text = lf(content);
+  const oldT = lf(oldText);
+  const newT = lf(newText);
+
+  if (oldT.length === 0) {
+    throw new NoteError("old_text must not be empty (use write_note to create a file).");
   }
-  return lines.length;
-}
-
-export interface NoteEditOpts {
-  mode: NoteMode;
-  text: string;
-  section?: string;
-}
-
-export function editNote(existing: string | null | undefined, opts: NoteEditOpts): string {
-  const { mode, section } = opts;
-  const text = lf(opts.text);
-
-  if (mode === "replace_file") {
-    return normalize(text);
-  }
-
-  const cur = lf(existing ?? "");
-
-  if (mode === "append") {
-    if (section) return appendToSection(cur, section, text);
-    const base = cur.replace(/\n+$/, "");
-    return normalize(base ? `${base}\n\n${text.trim()}` : text.trim());
+  if (oldT === newT) {
+    throw new NoteError("old_text and new_text are identical — nothing to change.");
   }
 
-  if (mode === "replace_section") {
-    if (!section) throw new NoteError("replace_section requires a section.");
-    return replaceSection(cur, section, text);
+  const n = countOccurrences(text, oldT);
+  if (n === 0) {
+    throw new NoteError("old_text was not found in the note. Read it first with get_note and copy the exact text.");
+  }
+  if (n > 1 && !replaceAll) {
+    throw new NoteError(
+      `old_text appears ${n} times — add surrounding context to make it unique, or set replace_all: true.`,
+    );
   }
 
-  throw new NoteError(`Unknown mode "${mode}".`);
+  const result = replaceAll ? text.split(oldT).join(newT) : text.replace(oldT, newT);
+  return normalize(result);
 }
 
-function appendToSection(cur: string, section: string, text: string): string {
-  const lines = cur.split("\n");
-  const h = findHeading(lines, section);
-  if (!h) throw new NoteError(`Section "${section}" not found in note.`);
-  const end = sectionEnd(lines, h.index, h.level);
-  // Back up over trailing blank lines inside the section so we append cleanly.
-  let insertAt = end;
-  while (insertAt > h.index + 1 && lines[insertAt - 1].trim() === "") insertAt--;
-  lines.splice(insertAt, 0, "", text.trim());
-  return normalize(lines.join("\n"));
-}
-
-function replaceSection(cur: string, section: string, text: string): string {
-  const lines = cur.split("\n");
-  const h = findHeading(lines, section);
-  if (!h) throw new NoteError(`Section "${section}" not found in note.`);
-  const end = sectionEnd(lines, h.index, h.level);
-  lines.splice(h.index + 1, end - (h.index + 1), "", text.trim(), "");
-  return normalize(lines.join("\n"));
+/** Ensure a brand-new file's content is normalized (single trailing newline). */
+export function normalizeContent(content: string): string {
+  return normalize(lf(content));
 }

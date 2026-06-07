@@ -183,6 +183,10 @@ export class HomesteadRepo {
     return `${API}/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents`;
   }
 
+  private get repoBase(): string {
+    return `${API}/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}`;
+  }
+
   private async authHeaders(): Promise<Record<string, string>> {
     const token = await getInstallationToken(this.env);
     return {
@@ -225,5 +229,38 @@ export class HomesteadRepo {
     if (!res.ok) throw new GitHubError(`putFile ${repoPath} failed: ${res.status} ${await res.text()}`, res.status);
     const json = (await res.json()) as { commit: { sha: string; html_url: string } };
     return { sha: json.commit.sha, url: json.commit.html_url };
+  }
+
+  /** Delete a file; returns the commit sha + html url. */
+  async deleteFile(repoPath: string, message: string, sha: string): Promise<CommitResult> {
+    const res = await fetch(`${this.base}/${encodePath(repoPath)}`, {
+      method: "DELETE",
+      headers: { ...(await this.authHeaders()), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message,
+        sha,
+        branch: this.env.GITHUB_BRANCH,
+        author: this.identity,
+        committer: this.identity,
+      }),
+    });
+    if (!res.ok) throw new GitHubError(`deleteFile ${repoPath} failed: ${res.status} ${await res.text()}`, res.status);
+    const json = (await res.json()) as { commit: { sha: string; html_url: string } };
+    return { sha: json.commit.sha, url: json.commit.html_url };
+  }
+
+  /**
+   * List every Markdown file under docs/ (one recursive tree call). Returns full
+   * repo paths + sizes. Used for browsing (list_notes) and scanning (search_notes).
+   */
+  async listDocsFiles(): Promise<{ path: string; size: number }[]> {
+    const url = `${this.repoBase}/git/trees/${encodeURIComponent(this.env.GITHUB_BRANCH)}?recursive=1`;
+    const res = await fetch(url, { headers: await this.authHeaders() });
+    if (!res.ok) throw new GitHubError(`listDocsFiles failed: ${res.status} ${await res.text()}`, res.status);
+    const json = (await res.json()) as { tree: { path: string; type: string; size?: number }[]; truncated?: boolean };
+    return json.tree
+      .filter((t) => t.type === "blob" && t.path.startsWith("docs/") && t.path.endsWith(".md"))
+      .map((t) => ({ path: t.path, size: t.size ?? 0 }))
+      .sort((a, b) => a.path.localeCompare(b.path));
   }
 }

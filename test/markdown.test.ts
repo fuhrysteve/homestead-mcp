@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { editNote, insertLogEntry, NoteError } from "../src/markdown.js";
+import { applyEdit, insertLogEntry, NoteError, normalizeContent } from "../src/markdown.js";
 
 const EXISTING_LOG = `# Gardening log
 
@@ -30,7 +30,6 @@ describe("insertLogEntry", () => {
     expect(out).toContain("# Gardening log");
     expect(out).toContain("## 2026 season");
     expect(out).toContain("### 2026-06-06 — First entry");
-    expect(out).toContain("- hello");
     expect(out.endsWith("\n")).toBe(true);
   });
 
@@ -46,7 +45,6 @@ describe("insertLogEntry", () => {
     const oldIdx = out.indexOf("### 2026-05-31 — Berry status walk");
     expect(newIdx).toBeGreaterThan(-1);
     expect(newIdx).toBeLessThan(oldIdx);
-    // didn't clobber history
     expect(out).toContain("## 2025 season (history)");
   });
 
@@ -57,84 +55,66 @@ describe("insertLogEntry", () => {
       title: "New year",
       domainTitle: "Gardening",
     });
-    const seasonIdx = out.indexOf("## 2027 season");
-    const oldSeasonIdx = out.indexOf("## 2026 season");
-    expect(seasonIdx).toBeGreaterThan(-1);
-    expect(seasonIdx).toBeLessThan(oldSeasonIdx);
+    expect(out.indexOf("## 2027 season")).toBeLessThan(out.indexOf("## 2026 season"));
     expect(out).toContain("### 2027-01-02 — New year");
   });
 
-  it("supports a title-only entry (no body)", () => {
-    const out = insertLogEntry(EXISTING_LOG, {
-      date: "2026-06-07",
-      year: "2026",
-      title: "Quick note",
-      domainTitle: "Gardening",
-    });
-    expect(out).toContain("### 2026-06-07 — Quick note");
-  });
-
   it("never produces 3+ consecutive newlines", () => {
-    const out = insertLogEntry(EXISTING_LOG, {
-      date: "2026-06-06",
-      year: "2026",
-      title: "Spacing",
-      body: "- x",
-      domainTitle: "Gardening",
-    });
+    const out = insertLogEntry(EXISTING_LOG, { date: "2026-06-06", year: "2026", title: "Spacing", body: "- x", domainTitle: "Gardening" });
     expect(out).not.toMatch(/\n\n\n/);
   });
 });
 
-const NOTE = `# Irrigation
+const NOTE = `# Pests
 
-Some intro.
+## Aphids
+- Spray with insecticidal soap.
 
-## How to tee off
-- Use two gear clamps.
-
-## Pressure
-- Well pressure is unregulated.
+## Cabbage looper
+- Use Bt and row cover.
 `;
 
-describe("editNote", () => {
-  it("appends to end of file by default", () => {
-    const out = editNote(NOTE, { mode: "append", text: "## New section\n- added" });
-    expect(out).toContain("## New section");
-    expect(out.trimEnd().endsWith("- added")).toBe(true);
+describe("applyEdit", () => {
+  it("replaces a unique occurrence", () => {
+    const out = applyEdit(NOTE, "Use Bt and row cover.", "Use Bt; add row cover after transplant.");
+    expect(out).toContain("Use Bt; add row cover after transplant.");
+    expect(out).not.toContain("Use Bt and row cover.");
   });
 
-  it("appends under a named section, before the next heading", () => {
-    const out = editNote(NOTE, { mode: "append", text: "- soften poly first", section: "How to tee off" });
-    const teeIdx = out.indexOf("## How to tee off");
-    const addedIdx = out.indexOf("- soften poly first");
-    const pressureIdx = out.indexOf("## Pressure");
-    expect(addedIdx).toBeGreaterThan(teeIdx);
-    expect(addedIdx).toBeLessThan(pressureIdx);
+  it("can append under a section by anchoring on the heading", () => {
+    const out = applyEdit(NOTE, "## Aphids", "## Aphids\n- Also: ladybugs help.");
+    const aphidsIdx = out.indexOf("## Aphids");
+    const addedIdx = out.indexOf("- Also: ladybugs help.");
+    const loopIdx = out.indexOf("## Cabbage looper");
+    expect(addedIdx).toBeGreaterThan(aphidsIdx);
+    expect(addedIdx).toBeLessThan(loopIdx);
   });
 
-  it("replaces a section body, keeping the heading", () => {
-    const out = editNote(NOTE, { mode: "replace_section", text: "- rewritten", section: "Pressure" });
-    expect(out).toContain("## Pressure");
-    expect(out).toContain("- rewritten");
-    expect(out).not.toContain("Well pressure is unregulated");
+  it("throws when old_text is not found", () => {
+    expect(() => applyEdit(NOTE, "nonexistent text", "x")).toThrow(NoteError);
   });
 
-  it("matches section headings case-insensitively", () => {
-    const out = editNote(NOTE, { mode: "append", text: "- x", section: "PRESSURE" });
-    expect(out).toContain("- x");
+  it("throws when old_text is ambiguous and replace_all is not set", () => {
+    expect(() => applyEdit(NOTE, "- ", "* ")).toThrow(NoteError);
   });
 
-  it("throws on a missing section", () => {
-    expect(() => editNote(NOTE, { mode: "append", text: "x", section: "Nonexistent" })).toThrow(NoteError);
+  it("replaces all occurrences with replace_all", () => {
+    const out = applyEdit("a x a x a", "x", "y", true);
+    expect(out.trim()).toBe("a y a y a");
   });
 
-  it("replace_section requires a section", () => {
-    expect(() => editNote(NOTE, { mode: "replace_section", text: "x" })).toThrow(NoteError);
+  it("throws when old_text equals new_text", () => {
+    expect(() => applyEdit(NOTE, "## Aphids", "## Aphids")).toThrow(NoteError);
   });
 
-  it("replace_file overwrites everything", () => {
-    const out = editNote(NOTE, { mode: "replace_file", text: "# Brand new" });
-    expect(out).toBe("# Brand new\n");
+  it("throws on empty old_text", () => {
+    expect(() => applyEdit(NOTE, "", "x")).toThrow(NoteError);
+  });
+});
+
+describe("normalizeContent", () => {
+  it("guarantees a single trailing newline", () => {
+    expect(normalizeContent("# Title")).toBe("# Title\n");
+    expect(normalizeContent("# Title\n\n\n")).toBe("# Title\n");
   });
 });

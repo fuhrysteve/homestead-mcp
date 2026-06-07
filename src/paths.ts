@@ -1,30 +1,11 @@
 /**
- * Path allowlist + validation. The entire security boundary for "where can this
- * server write" lives here: writes are only ever permitted under docs/<domain>/,
- * and reference/ (binaries) is hard off-limits. Enforced server-side regardless
- * of what the caller asks for.
+ * Path validation. The security boundary: every read/write is confined to the
+ * repo's docs/ subtree. Because we always prefix "docs/" and reject ".." and
+ * absolute paths, callers can never escape docs/ (so the binary reference/ tree —
+ * a sibling of docs/ — is unreachable). New domains/subdirs under docs/ are allowed.
  */
 
 export class PathError extends Error {}
-export class DomainError extends Error {}
-
-/** Parse a comma-separated allowlist env string into a normalized list. */
-export function parseDomains(csv: string | undefined): string[] {
-  return (csv ?? "")
-    .split(",")
-    .map((d) => d.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-export function assertDomain(domain: string, allowed: string[]): string {
-  const d = String(domain ?? "").trim().toLowerCase();
-  if (!allowed.includes(d)) {
-    throw new DomainError(
-      `Unknown domain "${domain}". Allowed: ${allowed.join(", ")}.`,
-    );
-  }
-  return d;
-}
 
 /** True if the string contains a NUL/control char (< 0x20) or a backslash (0x5C). */
 function hasIllegalChars(s: string): boolean {
@@ -60,30 +41,41 @@ function cleanRelative(rel: string): string {
 }
 
 /**
- * Build the full repo-relative path for a note file, e.g.
- * buildDocPath("gardening", "irrigation.md") -> "docs/gardening/irrigation.md".
- * Throws if the file escapes docs/<domain>/ or targets reference/.
+ * Resolve a wiki path (relative to docs/, e.g. "gardening/pests.md") to its full
+ * repo path "docs/gardening/pests.md". Throws if it isn't a .md file or escapes docs/.
  */
-export function buildDocPath(domain: string, file: string, allowed: string[]): string {
-  const d = assertDomain(domain, allowed);
-  const cleaned = cleanRelative(file);
-  const full = `docs/${d}/${cleaned}`;
-
-  // Defense in depth: re-verify the resolved path can't have escaped the subtree.
-  const base = `docs/${d}/`;
-  if (!full.startsWith(base)) {
-    throw new PathError(`Resolved path "${full}" escapes ${base}.`);
+export function resolveDocPath(path: string): string {
+  const cleaned = cleanRelative(path);
+  if (!cleaned.endsWith(".md")) {
+    throw new PathError(`Only Markdown (.md) files are allowed (got "${path}").`);
   }
-  if (/(^|\/)reference(\/|$)/.test(full)) {
-    throw new PathError("Writing under reference/ is not allowed.");
-  }
-  if (!full.endsWith(".md")) {
-    throw new PathError("Only Markdown (.md) note files are allowed.");
+  const full = `docs/${cleaned}`;
+  if (!full.startsWith("docs/")) {
+    throw new PathError(`Resolved path "${full}" escapes docs/.`);
   }
   return full;
 }
 
-/** Fixed path for a domain's dated-event log. */
-export function logPath(domain: string, allowed: string[]): string {
-  return buildDocPath(domain, "log.md", allowed);
+/** Validate a domain (single path segment under docs/, e.g. "gardening"). */
+export function domainSegment(domain: string): string {
+  const d = cleanRelative(String(domain ?? "").trim());
+  if (d.includes("/")) {
+    throw new PathError(`Domain must be a single path segment (got "${domain}").`);
+  }
+  return d;
+}
+
+/** Full path to a domain's dated-event log, e.g. domain "gardening" -> docs/gardening/log.md. */
+export function domainLogPath(domain: string): string {
+  return resolveDocPath(`${domainSegment(domain)}/log.md`);
+}
+
+/** Strip the leading "docs/" for display, e.g. "docs/gardening/pests.md" -> "gardening/pests.md". */
+export function toWikiPath(fullPath: string): string {
+  return fullPath.startsWith("docs/") ? fullPath.slice("docs/".length) : fullPath;
+}
+
+/** Is this a repo path we expose as a wiki note (a .md file under docs/)? */
+export function isWikiNote(fullPath: string): boolean {
+  return fullPath.startsWith("docs/") && fullPath.endsWith(".md");
 }

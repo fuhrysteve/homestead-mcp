@@ -1,26 +1,33 @@
 # homestead-mcp
 
-Remote **MCP server** (Cloudflare Worker) that lets Claude write notes and dated
-events back to the [`fuhrysteve/homestead`](https://github.com/fuhrysteve/homestead)
-repo — the gardening / chickens / beekeeping knowledge base — through a **narrow,
-convention-enforcing tool surface**.
+Remote **MCP server** (Cloudflare Worker) that lets Claude maintain the
+[`fuhrysteve/homestead`](https://github.com/fuhrysteve/homestead) repo — the
+gardening / chickens / beekeeping knowledge base — as a **living wiki**, through a
+**narrow, convention-enforcing tool surface** confined to the repo's `docs/` tree.
 
 Built for MaryBeth's phone-only claude.ai (Pro) account via a **custom connector**:
-mid-conversation, decisions and dated events get committed to the homestead repo
-without her touching git. Full spec, threat model, and rationale live in the homelab
-repo: `docs/homestead-notes-mcp.md`.
+as she brainstorms, troubleshoots, and plans on her phone, Claude reads and writes the
+homestead wiki for her — no git, terminal, or laptop. Full spec, threat model, and
+rationale live in the homelab repo: `docs/homestead-notes-mcp.md`.
 
 ## What it does
 
-Three tools, and nothing else — no generic file write, no shell, no read-arbitrary-path:
+A constrained wiki editor over `docs/` — Read/Write/Edit mirror Claude Code; list/search
+let Claude navigate; `log_event` keeps the dated-log convention. No generic file write,
+no shell, no read outside `docs/`.
 
 | Tool | Purpose |
 |------|---------|
-| `log_event(domain, title, body?, date?)` | Prepend a `### <date> — <title>` section at the top of the current season in `docs/<domain>/log.md`. |
-| `update_note(domain, file, text, mode?, section?)` | Edit a persistent-context note under `docs/<domain>/` (append / replace a section / replace file). |
-| `get_note(domain, file)` | Read a note under `docs/<domain>/` so Claude can edit it accurately first. |
+| `list_notes(subdir?)` | Browse the wiki tree (what pages exist). |
+| `search_notes(query, subdir?)` | Find existing knowledge before writing (avoid duplicate pages). |
+| `get_note(path)` | Read a page, e.g. `gardening/pests.md` (like Claude Code "Read"). |
+| `edit_note(path, old_text, new_text, replace_all?)` | Surgical find/replace in a page (like "Edit"). |
+| `write_note(path, content)` | Create or overwrite a whole page — any path under `docs/`, **new domains allowed** (like "Write"). |
+| `log_event(domain, title, body?, date?)` | Prepend a `### <date> — <title>` entry to `docs/<domain>/log.md`. |
+| `delete_note(path)` / `move_note(path, new_path)` | Housekeeping (revertible commits). |
 
-`domain ∈ {gardening, chickens, beekeeping}` (set via `ALLOWED_DOMAINS`).
+All file paths are relative to `docs/` and must be `.md`. New top-level domains
+(e.g. `orchard/…`) are created simply by writing a page there.
 
 ### Security model (two separate credentials)
 
@@ -34,9 +41,10 @@ Three tools, and nothing else — no generic file write, no shell, no read-arbit
   user** (author + committer) — MB's saves show as MB, Steve's as Steve — using their
   GitHub `noreply` email when their address is private; falls back to the `homestead-bot`
   identity (`COMMIT_AUTHOR_*`) only if no user identity is available.
-- **Path allowlist** — every write is forced under `docs/<domain>/`; `..`, absolute
-  paths, backslashes, control chars, non-`.md`, and anything under `reference/` are
-  rejected server-side regardless of caller input (see `src/paths.ts` + tests).
+- **Path confinement** — every read/write is forced under `docs/` and must be `.md`;
+  `..`, absolute paths, backslashes, and control chars are rejected server-side. Since
+  everything is prefixed `docs/`, the sibling `reference/` binary tree is unreachable
+  (see `src/paths.ts` + tests).
 - **Blast radius** — worst case is "the one homestead repo," every change a revertible
   git commit. The Worker runs on Cloudflare's edge — **zero inbound exposure to the homelab.**
 
@@ -46,12 +54,12 @@ Three tools, and nothing else — no generic file write, no shell, no read-arbit
 src/
   index.ts           OAuthProvider wiring + the McpAgent (HomesteadMCP)
   github-handler.ts  GitHub OAuth upstream (login gate + allowlist)
-  tools.ts           log_event / update_note / get_note (the whole write surface)
-  markdown.ts        log-insertion + note-edit transforms (pure, tested)
-  paths.ts           docs/<domain>/ path allowlist (pure, tested)
-  github.ts          GitHub App token + Contents API client
+  tools.ts           the 8 wiki tools (list/search/get/edit/write/log/delete/move)
+  markdown.ts        log-insertion + find/replace edit transforms (pure, tested)
+  paths.ts           docs/ path confinement (pure, tested)
+  github.ts          GitHub App token + Contents/Trees API client
   env.ts             binding types
-test/                vitest unit tests (paths, markdown)
+test/                vitest unit tests (paths, markdown, identity)
 wrangler.jsonc       bindings + non-secret vars
 ```
 
@@ -112,11 +120,45 @@ npx wrangler deploy
 
 ### 4. The connector (in MB's claude.ai account)
 
-1. Settings → Connectors → add custom connector, URL `https://homestead-mcp.fuhry.app/mcp`.
-2. Authorize once (Steve does this — GitHub login, allowlisted).
-3. Set `log_event` and `update_note` to **Always allow**.
-4. Create the "Homestead" Project with the project-instructions block from
-   `docs/homestead-notes-mcp.md` §4.
+1. Settings → Connectors → add custom connector, URL **`https://homestead-mcp.fuhry.org/mcp`**
+   (must include the `/mcp` path — the bare hostname authorizes but then 404s on MCP traffic).
+2. Authorize once (GitHub login, allowlisted).
+3. Set the writing tools — `write_note`, `edit_note`, `log_event`, `move_note` — to
+   **Always allow**. Consider leaving `delete_note` on **Needs approval**. (Read tools
+   `list_notes` / `search_notes` / `get_note` need no approval.)
+4. Create the "Homestead" Project with the [project instructions](#project-instructions) below.
+
+## Project instructions
+
+Paste into MB's "Homestead" Claude Project. This is what turns the tools into an actively-
+maintained wiki rather than a passive log:
+
+> You help run our homestead and you maintain its knowledge base — a wiki of Markdown pages
+> under `docs/` (domains: gardening, chickens, beekeeping, and new ones you create as needed).
+> You can browse it (`list_notes`), search it (`search_notes`), read pages (`get_note`),
+> create/rewrite pages (`write_note`), make surgical edits (`edit_note`), record dated events
+> (`log_event`), and tidy up (`move_note` / `delete_note`).
+>
+> **Ground every substantive answer in the wiki.** Before answering a how-to, planning, or
+> troubleshooting question, `search_notes` (and read the relevant page) so you build on what we
+> already know and our actual setup, not generic advice.
+>
+> **Capture durable knowledge as we go, without being asked.** When a conversation produces a
+> decision, a plan, a how-to, a diagnosis, or a changed fact, write it into the right topic page:
+> `edit_note` for a small change to an existing page, `write_note` to create a new page or section.
+> Keep edits surgical and read the page first. Put lasting context in domain `README.md`/topic
+> pages; put things that *happened on a date* (a planting, an inspection, a pest sighting, a repair)
+> in `log_event`. If a topic doesn't fit an existing page, create one (e.g. `gardening/pests.md`);
+> if it doesn't fit an existing domain, create a new domain.
+>
+> **Troubleshooting (e.g. a photo of leaf/pest damage):** identify it and give treatment advice,
+> then capture the finding — what it was, how you identified it, what to do — on the relevant topic
+> page (e.g. `gardening/pests.md`) and, if it happened on a date, a `log_event` too. (You can't save
+> the photo itself; capture the knowledge.)
+>
+> Follow repo conventions: newest-first ISO-dated log entries; advice suited to NE Ohio / Zone 6a.
+> After you save, confirm in one line what you wrote and where. When unsure whether something is
+> worth keeping, save it — a brief note beats losing it.
 
 ## License
 

@@ -16,18 +16,24 @@ A constrained wiki editor over `docs/` — Read/Write/Edit mirror Claude Code; l
 let Claude navigate; `log_event` keeps the dated-log convention. No generic file write,
 no shell, no read outside `docs/`.
 
-| Tool | Purpose |
-|------|---------|
-| `list_notes(subdir?)` | Browse the wiki tree (what pages exist). |
-| `search_notes(query, subdir?)` | Find existing knowledge before writing (avoid duplicate pages). |
-| `get_note(path)` | Read a page, e.g. `gardening/pests.md` (like Claude Code "Read"). |
-| `edit_note(path, old_text, new_text, replace_all?)` | Surgical find/replace in a page (like "Edit"). |
-| `write_note(path, content)` | Create or overwrite a whole page — any path under `docs/`, **new domains allowed** (like "Write"). |
-| `log_event(domain, title, body?, date?)` | Prepend a `### <date> — <title>` entry to `docs/<domain>/log.md`. |
-| `delete_note(path)` / `move_note(path, new_path)` | Housekeeping (revertible commits). |
+| Tool | R/W | Purpose |
+|------|-----|---------|
+| `list_notes(subdir?)` | R | Browse the wiki tree (what pages exist). |
+| `search_notes(query, subdir?)` | R | Find existing knowledge before writing (avoid duplicate pages). |
+| `get_note(path)` | R | Read a page, e.g. `gardening/pests.md` (like Claude Code "Read"). |
+| `recent_changes(limit?)` | R | Recent commits to `docs/` — continuity across MB's/your/CC sessions. |
+| `get_weather()` | R | Local Huntsburg forecast (Pirate Weather): now + next days + frost flag. |
+| `list_tasks(domain?, include_done?)` | R | List open/done tasks. |
+| `edit_note(path, old_text, new_text, replace_all?)` | W | Surgical find/replace in a page (like "Edit"). |
+| `write_note(path, content)` | W | Create/overwrite a whole page — any path under `docs/`, **new domains allowed** ("Write"). |
+| `append_note(path, text, section?)` | W | Quick append to a page / under a `##` section, no rewrite. |
+| `log_event(domain, title, body?, date?)` | W | Prepend a `### <date> — <title>` entry to `docs/<domain>/log.md`. |
+| `add_task(text, domain?)` / `complete_task(match, domain?)` | W | Checkbox task list (`docs/tasks.md` or `docs/<domain>/tasks.md`). |
+| `move_note(path, new_path)` / `delete_note(path)` / `undo_last(path?)` | W | Housekeeping (revertible commits). |
 
 All file paths are relative to `docs/` and must be `.md`. New top-level domains
-(e.g. `orchard/…`) are created simply by writing a page there.
+(e.g. `orchard/…`) are created simply by writing a page there. Dates default to
+`HOME_TZ` (America/New_York). Weather uses Pirate Weather (`PIRATE_WEATHER_API_KEY`).
 
 ### Security model (two separate credentials)
 
@@ -123,9 +129,11 @@ npx wrangler deploy
 1. Settings → Connectors → add custom connector, URL **`https://homestead-mcp.fuhry.org/mcp`**
    (must include the `/mcp` path — the bare hostname authorizes but then 404s on MCP traffic).
 2. Authorize once (GitHub login, allowlisted).
-3. Set the writing tools — `write_note`, `edit_note`, `log_event`, `move_note` — to
-   **Always allow**. Consider leaving `delete_note` on **Needs approval**. (Read tools
-   `list_notes` / `search_notes` / `get_note` need no approval.)
+3. Set the writing tools — `write_note`, `edit_note`, `append_note`, `log_event`,
+   `add_task`, `complete_task`, `move_note` — to **Always allow**. Consider leaving the
+   destructive ones (`delete_note`, `undo_last`) on **Needs approval**. (Read tools —
+   `list_notes` / `search_notes` / `get_note` / `recent_changes` / `get_weather` /
+   `list_tasks` — need no approval.)
 4. Create the "Homestead" Project with the [project instructions](#project-instructions) below.
 
 ## Project instructions
@@ -135,13 +143,21 @@ maintained wiki rather than a passive log:
 
 > You help run our homestead and you maintain its knowledge base — a wiki of Markdown pages
 > under `docs/` (domains: gardening, chickens, beekeeping, and new ones you create as needed).
-> You can browse it (`list_notes`), search it (`search_notes`), read pages (`get_note`),
-> create/rewrite pages (`write_note`), make surgical edits (`edit_note`), record dated events
-> (`log_event`), and tidy up (`move_note` / `delete_note`).
+> You can browse it (`list_notes`), search it (`search_notes`), read pages (`get_note`), see
+> what changed lately (`recent_changes`), create/rewrite pages (`write_note`), make surgical
+> edits (`edit_note`), append quickly (`append_note`), record dated events (`log_event`), keep a
+> to-do list (`add_task` / `list_tasks` / `complete_task`), check the local forecast
+> (`get_weather`), and tidy up (`move_note` / `delete_note` / `undo_last`).
 >
 > **Ground every substantive answer in the wiki.** Before answering a how-to, planning, or
 > troubleshooting question, `search_notes` (and read the relevant page) so you build on what we
-> already know and our actual setup, not generic advice.
+> already know and our actual setup, not generic advice. Use `recent_changes` to catch up on what's
+> happened recently. For anything time- or weather-sensitive (frost, spraying, planting, watering),
+> check `get_weather` first so advice fits the actual forecast.
+>
+> **Turn plans into action.** When we decide we should do something later, capture it with
+> `add_task` (scope it to a domain when it fits) so it isn't lost; mark it done with `complete_task`
+> when we've done it.
 >
 > **Capture durable knowledge as we go, without being asked.** When a conversation produces a
 > decision, a plan, a how-to, a diagnosis, or a changed fact, write it into the right topic page:

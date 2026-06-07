@@ -2,8 +2,11 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "homestead-mcp",
   "main": "src/index.ts",
+  "account_id": "6e7db3662c43e6a2949b8208224efa0b",
   "compatibility_date": "2025-05-10",
   "compatibility_flags": ["nodejs_compat"],
+  // Only reachable at the custom domain below — not exposed on *.workers.dev.
+  "workers_dev": false,
   "observability": {
     "enabled": true
   },
@@ -35,7 +38,7 @@
   "kv_namespaces": [
     {
       "binding": "OAUTH_KV",
-      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+      "id": "5685bd9705044a829da488d17c24b32f"
     }
   ],
   // Non-secret config. Secrets (GITHUB_CLIENT_SECRET, GITHUB_APP_PRIVATE_KEY,

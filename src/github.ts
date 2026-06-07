@@ -263,4 +263,66 @@ export class HomesteadRepo {
       .map((t) => ({ path: t.path, size: t.size ?? 0 }))
       .sort((a, b) => a.path.localeCompare(b.path));
   }
+
+  /** Read a file at a specific ref (commit sha / branch), or null if absent there. */
+  async getFileAtRef(repoPath: string, ref: string): Promise<FileState | null> {
+    const url = `${this.base}/${encodePath(repoPath)}?ref=${encodeURIComponent(ref)}`;
+    const res = await fetch(url, { headers: await this.authHeaders() });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new GitHubError(`getFileAtRef ${repoPath}@${ref} failed: ${res.status}`, res.status);
+    const json = (await res.json()) as { content?: string; sha: string; type: string };
+    if (json.type !== "file" || json.content === undefined) throw new GitHubError(`${repoPath}@${ref} is not a file.`, 422);
+    return { content: decodeBase64Utf8(json.content), sha: json.sha };
+  }
+
+  /** Most recent commits (optionally limited to a path), newest first. */
+  async listCommits(limit: number, path?: string): Promise<CommitInfo[]> {
+    const params = new URLSearchParams({ per_page: String(Math.min(Math.max(limit, 1), 50)), sha: this.env.GITHUB_BRANCH });
+    if (path) params.set("path", path);
+    const res = await fetch(`${this.repoBase}/commits?${params}`, { headers: await this.authHeaders() });
+    if (!res.ok) throw new GitHubError(`listCommits failed: ${res.status} ${await res.text()}`, res.status);
+    const json = (await res.json()) as {
+      sha: string;
+      commit: { message: string; author: { name: string; date: string } };
+      author: { login: string } | null;
+    }[];
+    return json.map((c) => ({
+      sha: c.sha,
+      message: c.commit.message.split("\n")[0],
+      author: c.author?.login ?? c.commit.author.name,
+      date: c.commit.author.date,
+    }));
+  }
+
+  /** Full detail for a single commit: its parent and the files it changed. */
+  async getCommitDetail(sha: string): Promise<CommitDetail> {
+    const res = await fetch(`${this.repoBase}/commits/${encodeURIComponent(sha)}`, { headers: await this.authHeaders() });
+    if (!res.ok) throw new GitHubError(`getCommitDetail ${sha} failed: ${res.status}`, res.status);
+    const json = (await res.json()) as {
+      sha: string;
+      commit: { message: string };
+      parents: { sha: string }[];
+      files: { filename: string; status: string; previous_filename?: string }[];
+    };
+    return {
+      sha: json.sha,
+      message: json.commit.message.split("\n")[0],
+      parent: json.parents[0]?.sha,
+      files: json.files.map((f) => ({ filename: f.filename, status: f.status, previousFilename: f.previous_filename })),
+    };
+  }
+}
+
+export interface CommitInfo {
+  sha: string;
+  message: string;
+  author: string;
+  date: string;
+}
+
+export interface CommitDetail {
+  sha: string;
+  message: string;
+  parent?: string;
+  files: { filename: string; status: string; previousFilename?: string }[];
 }

@@ -137,3 +137,45 @@ export function applyEdit(
 export function normalizeContent(content: string): string {
   return normalize(lf(content));
 }
+
+// ---- append -------------------------------------------------------------
+
+function findHeading(lines: string[], section: string): { index: number; level: number } | null {
+  const want = section.trim().toLowerCase();
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(#{1,6})\s+(.*?)\s*$/.exec(lines[i]);
+    if (m && m[2].trim().toLowerCase() === want) return { index: i, level: m[1].length };
+  }
+  return null;
+}
+
+/** Index of the next heading at level <= `level`, else end of file. */
+function sectionEnd(lines: string[], startIdx: number, level: number): number {
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const m = /^(#{1,6})\s+/.exec(lines[i]);
+    if (m && m[1].length <= level) return i;
+  }
+  return lines.length;
+}
+
+/**
+ * Append `text` to a note — at the end of the file, or at the end of a named
+ * `## section` if `section` is given. Throws if the section isn't found.
+ */
+export function appendToNote(content: string, text: string, section?: string): string {
+  const body = lf(text).trim();
+  if (!body) throw new NoteError("Nothing to append.");
+  const lines = lf(content).split("\n");
+
+  if (section) {
+    const h = findHeading(lines, section);
+    if (!h) throw new NoteError(`Section "${section}" not found. Read the page or omit section to append at the end.`);
+    let insertAt = sectionEnd(lines, h.index, h.level);
+    while (insertAt > h.index + 1 && lines[insertAt - 1].trim() === "") insertAt--;
+    lines.splice(insertAt, 0, "", body);
+    return normalize(lines.join("\n"));
+  }
+
+  const base = lf(content).replace(/\n+$/, "");
+  return normalize(base ? `${base}\n\n${body}` : body);
+}

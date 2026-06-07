@@ -53,6 +53,10 @@
     "GITHUB_BRANCH": "master",
     // Allowed homestead domains (docs/<domain>/...), comma-separated.
     "ALLOWED_DOMAINS": "gardening,chickens,beekeeping",
+    // Homestead location + timezone (Huntsburg, OH). PIRATE_WEATHER_API_KEY is a secret.
+    "HOME_TZ": "America/New_York",
+    "HOME_LAT": "41.5646",
+    "HOME_LON": "-81.0724",
     // Bot commit identity.
     "COMMIT_AUTHOR_NAME": "homestead-bot",
     "COMMIT_AUTHOR_EMAIL": "homestead-bot@fuhry.app",

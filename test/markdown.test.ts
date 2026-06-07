@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyEdit, insertLogEntry, NoteError, normalizeContent } from "../src/markdown.js";
+import { appendToNote, applyEdit, insertLogEntry, NoteError, normalizeContent } from "../src/markdown.js";
 
 const EXISTING_LOG = `# Gardening log
 
@@ -116,5 +116,23 @@ describe("normalizeContent", () => {
   it("guarantees a single trailing newline", () => {
     expect(normalizeContent("# Title")).toBe("# Title\n");
     expect(normalizeContent("# Title\n\n\n")).toBe("# Title\n");
+  });
+});
+
+describe("appendToNote", () => {
+  it("appends to the end of the file", () => {
+    const out = appendToNote(NOTE, "## New\n- fresh");
+    expect(out.trimEnd().endsWith("- fresh")).toBe(true);
+  });
+  it("appends under a named section, before the next heading", () => {
+    const out = appendToNote(NOTE, "- ladybugs help", "Aphids");
+    const aphids = out.indexOf("## Aphids");
+    const added = out.indexOf("- ladybugs help");
+    const loop = out.indexOf("## Cabbage looper");
+    expect(added).toBeGreaterThan(aphids);
+    expect(added).toBeLessThan(loop);
+  });
+  it("throws when the section is not found", () => {
+    expect(() => appendToNote(NOTE, "- x", "Nonexistent")).toThrow(NoteError);
   });
 });

@@ -24,6 +24,12 @@ export interface Env {
   GITHUB_APP_ID: string;
   GITHUB_APP_INSTALLATION_ID?: string; // optional; auto-resolved from the repo if unset
   GITHUB_APP_PRIVATE_KEY: string; // secret, PKCS#8 PEM
+
+  // Local context (homestead location / timezone).
+  HOME_TZ: string; // IANA tz, e.g. America/New_York — used for default log dates
+  HOME_LAT: string;
+  HOME_LON: string;
+  PIRATE_WEATHER_API_KEY: string; // secret
 }
 
 /** The authenticated caller's identity, propagated from the OAuth layer into the MCP agent. */

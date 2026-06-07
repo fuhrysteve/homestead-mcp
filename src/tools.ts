@@ -9,14 +9,21 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Env, UserProps } from "./env.js";
 import { commitIdentity, GitHubError, HomesteadRepo, type CommitResult } from "./github.js";
-import { applyEdit, insertLogEntry, NoteError, normalizeContent } from "./markdown.js";
-import { domainLogPath, domainSegment, PathError, resolveDocPath, toWikiPath } from "./paths.js";
+import { appendToNote, applyEdit, insertLogEntry, NoteError, normalizeContent } from "./markdown.js";
+import { addTask, completeTask, listTasks } from "./tasks.js";
+import { getWeatherSummary, WeatherError } from "./weather.js";
+import { domainLogPath, domainSegment, isWikiNote, PathError, resolveDocPath, toWikiPath } from "./paths.js";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const SEARCH_FILE_CAP = 80; // max files scanned per search
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+/** Today's date in the homestead's timezone (so an evening entry isn't logged as tomorrow UTC). */
+function todayLocal(env: Env): string {
+  try {
+    return new Date().toLocaleDateString("en-CA", { timeZone: env.HOME_TZ || "America/New_York" });
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
 }
 
 function titleCase(d: string): string {
@@ -29,7 +36,7 @@ function textResult(text: string) {
 
 function errorResult(err: unknown) {
   const known =
-    err instanceof PathError || err instanceof NoteError || err instanceof GitHubError;
+    err instanceof PathError || err instanceof NoteError || err instanceof GitHubError || err instanceof WeatherError;
   const msg = err instanceof Error ? err.message : String(err);
   return {
     content: [{ type: "text" as const, text: known ? `Rejected: ${msg}` : `Error: ${msg}` }],
@@ -248,7 +255,7 @@ export function registerTools(server: McpServer, env: Env, props: UserProps): vo
         if (date && !ISO_DATE.test(date)) throw new PathError(`date must be YYYY-MM-DD, got "${date}".`);
         const dom = domainSegment(domain);
         const path = domainLogPath(dom);
-        const d = date ?? todayIso();
+        const d = date ?? todayLocal(env);
         const commit = await commitTransform(
           repo,
           path,
@@ -305,6 +312,193 @@ export function registerTools(server: McpServer, env: Env, props: UserProps): vo
         await repo.putFile(to, src.content, `notes: move ${toWikiPath(from)} -> ${toWikiPath(to)}`);
         const commit = await repo.deleteFile(from, `notes: move ${toWikiPath(from)} -> ${toWikiPath(to)} (remove old)`, src.sha);
         return textResult(`Moved ${toWikiPath(from)} -> ${toWikiPath(to)}. Commit ${commit.sha.slice(0, 7)}: ${commit.url}`);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  // ---- recent activity --------------------------------------------------
+  server.tool(
+    "recent_changes",
+    "Show recent changes to the knowledge base (who changed what, when) — the repo is a shared " +
+      "brain that you, MaryBeth, and other sessions all write to. Use it for continuity: 'what did " +
+      "we decide / change lately?'",
+    {
+      limit: z.number().int().min(1).max(50).optional().describe("How many recent changes (default 10)."),
+    },
+    async ({ limit }) => {
+      try {
+        const commits = await repo.listCommits(limit ?? 10, "docs");
+        if (commits.length === 0) return textResult("No changes recorded yet.");
+        const out = commits.map((c) => `• ${c.date.slice(0, 10)} — ${c.author}: ${c.message} (${c.sha.slice(0, 7)})`);
+        return textResult([`Last ${commits.length} change(s) to the wiki:`, ...out].join("\n"));
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  // ---- weather ----------------------------------------------------------
+  server.tool(
+    "get_weather",
+    "Get the local forecast for the homestead (Huntsburg, OH): current conditions, the next few " +
+      "days, and any frost risk. Use it to make advice actionable (cover plants before a frost, " +
+      "time a spray for a dry day, etc.).",
+    {},
+    async () => {
+      try {
+        return textResult(await getWeatherSummary(env));
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  // ---- quick append -----------------------------------------------------
+  server.tool(
+    "append_note",
+    "Quickly add text to an existing page — at the end, or under a named `## section` — without " +
+      "rewriting it. Good for adding a bullet or finding. The page must exist (use write_note to create).",
+    {
+      path: z.string().describe("Page path under docs/, e.g. 'gardening/pests.md'."),
+      text: z.string().min(1).describe("Markdown to append (e.g. a `- ` bullet)."),
+      section: z.string().optional().describe('Optional `##` heading to append under, e.g. "Aphids".'),
+    },
+    async ({ path, text, section }) => {
+      try {
+        const full = resolveDocPath(path);
+        const commit = await commitTransform(
+          repo,
+          full,
+          (cur) => {
+            if (cur === null) throw new NoteError(`${toWikiPath(full)} does not exist. Use write_note to create it.`);
+            return appendToNote(cur, text, section);
+          },
+          `notes(${toWikiPath(full)}): append`,
+        );
+        return textResult(`Appended to ${toWikiPath(full)}${section ? ` › "${section}"` : ""}. Commit ${commit.sha.slice(0, 7)}: ${commit.url}`);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  // ---- tasks ------------------------------------------------------------
+  const taskPath = (domain?: string) =>
+    domain ? resolveDocPath(`${domainSegment(domain)}/tasks.md`) : resolveDocPath("tasks.md");
+  const taskTitle = (domain?: string) => (domain ? titleCase(domainSegment(domain)) : "Homestead");
+
+  server.tool(
+    "add_task",
+    "Add an open to-do item to the task list — turn 'we should do X' into a tracked next-action. " +
+      "Goes in docs/tasks.md, or docs/<domain>/tasks.md if a domain is given.",
+    {
+      text: z.string().min(1).describe("The task, e.g. 'put row cover over the broccoli before the loopers return'."),
+      domain: z.string().optional().describe("Optional domain to scope the list, e.g. 'gardening'."),
+    },
+    async ({ text, domain }) => {
+      try {
+        const path = taskPath(domain);
+        const commit = await commitTransform(repo, path, (cur) => addTask(cur, text, taskTitle(domain)), `tasks(${toWikiPath(path)}): add`);
+        return textResult(`Added task to ${toWikiPath(path)}. Commit ${commit.sha.slice(0, 7)}: ${commit.url}`);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.tool(
+    "list_tasks",
+    "List to-do items (open by default). docs/tasks.md, or docs/<domain>/tasks.md if a domain is given.",
+    {
+      domain: z.string().optional().describe("Optional domain to scope the list, e.g. 'gardening'."),
+      include_done: z.boolean().optional().describe("Also list completed tasks (default false)."),
+    },
+    async ({ domain, include_done }) => {
+      try {
+        const path = taskPath(domain);
+        const state = await repo.getFile(path);
+        if (!state) return textResult(`No task list yet (${toWikiPath(path)} doesn't exist). Use add_task to start one.`);
+        const { open, done } = listTasks(state.content);
+        const lines = [`Open (${open.length}):`, ...open.map((t) => `  ☐ ${t}`)];
+        if (include_done) lines.push(`Done (${done.length}):`, ...done.map((t) => `  ☑ ${t}`));
+        return textResult(lines.join("\n"));
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.tool(
+    "complete_task",
+    "Mark an open task as done (matched by text, must be unique). docs/tasks.md or docs/<domain>/tasks.md.",
+    {
+      match: z.string().min(1).describe("Text identifying the open task, e.g. 'row cover'."),
+      domain: z.string().optional().describe("Optional domain the task list is scoped to."),
+    },
+    async ({ match, domain }) => {
+      try {
+        const path = taskPath(domain);
+        const d = todayLocal(env);
+        const commit = await commitTransform(
+          repo,
+          path,
+          (cur) => {
+            if (cur === null) throw new NoteError(`No task list at ${toWikiPath(path)}.`);
+            return completeTask(cur, match, d);
+          },
+          `tasks(${toWikiPath(path)}): complete`,
+        );
+        return textResult(`Completed task in ${toWikiPath(path)}. Commit ${commit.sha.slice(0, 7)}: ${commit.url}`);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  // ---- undo -------------------------------------------------------------
+  server.tool(
+    "undo_last",
+    "Undo the most recent change to the wiki (optionally to a specific page) by restoring it to its " +
+      "previous state. Use for 'undo that' / 'revert my last change'. Reverts one commit.",
+    {
+      path: z.string().optional().describe("Optional page to undo the last change to, e.g. 'gardening/pests.md'."),
+    },
+    async ({ path }) => {
+      try {
+        const scope = path ? resolveDocPath(path) : "docs";
+        const commits = await repo.listCommits(1, scope);
+        if (commits.length === 0) return textResult("Nothing to undo.");
+        const detail = await repo.getCommitDetail(commits[0].sha);
+        if (!detail.parent) return textResult("Can't undo the initial commit.");
+        const msg = `revert ${detail.sha.slice(0, 7)}: ${detail.message}`;
+        const undone: string[] = [];
+        for (const f of detail.files) {
+          if (!isWikiNote(f.filename)) continue;
+          const cur = await repo.getFile(f.filename);
+          if (f.status === "added") {
+            if (cur) {
+              await repo.deleteFile(f.filename, msg, cur.sha);
+              undone.push(`removed ${toWikiPath(f.filename)}`);
+            }
+          } else if (f.status === "renamed" && f.previousFilename) {
+            const prev = await repo.getFileAtRef(f.previousFilename, detail.parent);
+            if (prev) await repo.putFile(f.previousFilename, prev.content, msg);
+            if (cur) await repo.deleteFile(f.filename, msg, cur.sha);
+            undone.push(`restored ${toWikiPath(f.previousFilename)}`);
+          } else {
+            const parent = await repo.getFileAtRef(f.filename, detail.parent);
+            if (parent) {
+              await repo.putFile(f.filename, parent.content, msg, cur?.sha);
+              undone.push(`restored ${toWikiPath(f.filename)}`);
+            }
+          }
+        }
+        if (undone.length === 0) {
+          return textResult(`The last change (${detail.sha.slice(0, 7)}) didn't touch a wiki page; nothing undone.`);
+        }
+        return textResult(`Undid ${detail.sha.slice(0, 7)} (${detail.message}): ${undone.join(", ")}.`);
       } catch (err) {
         return errorResult(err);
       }

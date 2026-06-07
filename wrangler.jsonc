@@ -46,7 +46,7 @@
   // COOKIE_ENCRYPTION_KEY) are set via `wrangler secret put`, never committed.
   "vars": {
     // GitHub login(s) allowed to authorize this connector, comma-separated.
-    "ALLOWED_GITHUB_LOGINS": "fuhrysteve",
+    "ALLOWED_GITHUB_LOGINS": "fuhrysteve,marybethfuhry",
     // Target repo the bot writes to.
     "GITHUB_OWNER": "fuhrysteve",
     "GITHUB_REPO": "homestead",

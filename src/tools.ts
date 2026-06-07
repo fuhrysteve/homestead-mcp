@@ -6,7 +6,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Env, UserProps } from "./env.js";
-import { GitHubError, HomesteadRepo, type CommitResult } from "./github.js";
+import { commitIdentity, GitHubError, HomesteadRepo, type CommitResult } from "./github.js";
 import { editNote, insertLogEntry, NoteError, type NoteMode } from "./markdown.js";
 import { buildDocPath, DomainError, logPath, parseDomains, PathError } from "./paths.js";
 
@@ -63,7 +63,8 @@ function shortSummary(s: string, max = 60): string {
 
 export function registerTools(server: McpServer, env: Env, props: UserProps): void {
   const domains = parseDomains(env.ALLOWED_DOMAINS);
-  const repo = new HomesteadRepo(env);
+  // Commits are attributed to the authenticated GitHub user (props), not a fixed bot.
+  const repo = new HomesteadRepo(env, commitIdentity(props, env));
   const domainList = domains.join(", ");
 
   server.tool(
@@ -165,6 +166,4 @@ export function registerTools(server: McpServer, env: Env, props: UserProps): vo
     },
   );
 
-  // props.login is available for per-call audit logging if desired.
-  void props;
 }

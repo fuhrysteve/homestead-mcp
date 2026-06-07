@@ -31,4 +31,5 @@ export interface UserProps extends Record<string, unknown> {
   login: string;
   name: string;
   email: string;
+  id?: number; // GitHub numeric user id — used to build the noreply commit email
 }

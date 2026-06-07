@@ -73,7 +73,7 @@ app.get("/callback", async (c) => {
     },
   });
   if (!userRes.ok) return c.text("Failed to fetch GitHub user", 502);
-  const user = (await userRes.json()) as { login: string; name: string | null; email: string | null };
+  const user = (await userRes.json()) as { id: number; login: string; name: string | null; email: string | null };
 
   // Allowlist enforcement — the actual access-control decision.
   if (!allowedLogins(c.env).includes(user.login.toLowerCase())) {
@@ -85,7 +85,7 @@ app.get("/callback", async (c) => {
     userId: user.login,
     metadata: { label: user.name ?? user.login },
     scope: oauthReqInfo.scope,
-    props: { login: user.login, name: user.name ?? user.login, email: user.email ?? "" },
+    props: { login: user.login, name: user.name ?? user.login, email: user.email ?? "", id: user.id },
   });
   return Response.redirect(redirectTo);
 });

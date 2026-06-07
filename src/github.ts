@@ -3,7 +3,7 @@
  * commit identity; its installation token is minted on demand from the App JWT
  * and cached until just before expiry. Plain fetch + WebCrypto — no SDK weight.
  */
-import type { Env } from "./env.js";
+import type { Env, UserProps } from "./env.js";
 
 const API = "https://api.github.com";
 const UA = "homestead-mcp";
@@ -144,6 +144,28 @@ function encodePath(p: string): string {
   return p.split("/").map(encodeURIComponent).join("/");
 }
 
+export interface CommitIdentity {
+  name: string;
+  email: string;
+}
+
+/**
+ * The git identity to attribute a commit to. Prefer the authenticated GitHub user
+ * (so MB's saves show as MB, Steve's as Steve); fall back to their privacy-preserving
+ * noreply address when their email is private, and finally to the configured bot.
+ */
+export function commitIdentity(props: UserProps, env: Env): CommitIdentity {
+  const login = props.login?.trim();
+  if (!login) {
+    return { name: env.COMMIT_AUTHOR_NAME, email: env.COMMIT_AUTHOR_EMAIL };
+  }
+  const name = (props.name && props.name.trim()) || login;
+  const email =
+    (props.email && props.email.trim()) ||
+    (props.id ? `${props.id}+${login}@users.noreply.github.com` : env.COMMIT_AUTHOR_EMAIL);
+  return { name, email };
+}
+
 export interface FileState {
   content: string;
   sha: string;
@@ -155,7 +177,7 @@ export interface CommitResult {
 }
 
 export class HomesteadRepo {
-  constructor(private env: Env) {}
+  constructor(private env: Env, private identity: CommitIdentity) {}
 
   private get base(): string {
     return `${API}/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/contents`;
@@ -186,13 +208,12 @@ export class HomesteadRepo {
 
   /** Create or update a file; returns the commit sha + html url. */
   async putFile(repoPath: string, content: string, message: string, sha?: string): Promise<CommitResult> {
-    const identity = { name: this.env.COMMIT_AUTHOR_NAME, email: this.env.COMMIT_AUTHOR_EMAIL };
     const body: Record<string, unknown> = {
       message,
       content: encodeBase64Utf8(content),
       branch: this.env.GITHUB_BRANCH,
-      author: identity,
-      committer: identity,
+      author: this.identity,
+      committer: this.identity,
     };
     if (sha) body.sha = sha;
 

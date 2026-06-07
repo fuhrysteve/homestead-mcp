@@ -30,7 +30,10 @@ Three tools, and nothing else — no generic file write, no shell, no read-arbit
   completes authorization for a login in `ALLOWED_GITHUB_LOGINS`.
 - **What writes the commits** — a GitHub **App** scoped to *only* `fuhrysteve/homestead`,
   **Contents: read/write**. Its installation token is minted on demand from the App
-  private key (WebCrypto RS256). Commits are authored as `homestead-bot`.
+  private key (WebCrypto RS256). Commits are **attributed to the authenticating GitHub
+  user** (author + committer) — MB's saves show as MB, Steve's as Steve — using their
+  GitHub `noreply` email when their address is private; falls back to the `homestead-bot`
+  identity (`COMMIT_AUTHOR_*`) only if no user identity is available.
 - **Path allowlist** — every write is forced under `docs/<domain>/`; `..`, absolute
   paths, backslashes, control chars, non-`.md`, and anything under `reference/` are
   rejected server-side regardless of caller input (see `src/paths.ts` + tests).

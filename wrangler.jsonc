@@ -10,12 +10,13 @@
   "observability": {
     "enabled": true
   },
-  // Public endpoint. custom_domain auto-creates the DNS record + cert for this
-  // hostname (overriding the private *.fuhry.app wildcard). Requires the fuhry.app
-  // zone to be on the same Cloudflare account.
+  // Public endpoint on fuhry.org (a separate Cloudflare zone). fuhry.app is NOT
+  // used here on purpose: the homelab's internal DNS swallows ALL of *.fuhry.app
+  // (any depth) to the LAN SWAG proxy, which breaks the in-browser OAuth /authorize
+  // step. fuhry.org isn't intercepted, so it resolves to the Worker from LAN + public.
   "routes": [
     {
-      "pattern": "homestead-mcp.fuhry.app",
+      "pattern": "homestead-mcp.fuhry.org",
       "custom_domain": true
     }
   ],
